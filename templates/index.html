@@ -1,40 +1,20 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Auto Resume Ranker</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <title>AI Resume Ranker</title>
+    <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
 
-<div class="container">
-    <h1>Auto Resume Ranker</h1>
+<h1>Resume Ranker</h1>
 
-    <form method="POST" enctype="multipart/form-data">
-        <textarea name="job_description" placeholder="Enter Job Description..." required></textarea>
+<input type="file" id="resumeUpload" multiple>
+<button onclick="rankResumes()">Rank Resumes</button>
 
-        <input type="file" name="resumes" multiple required>
+<div id="results"></div>
 
-        <button type="submit">Rank Resumes</button>
-    </form>
-
-    {% if results %}
-    <h2>Ranked Results</h2>
-    <table>
-        <tr>
-            <th>Rank</th>
-            <th>Resume</th>
-            <th>Match %</th>
-        </tr>
-        {% for resume, score in results %}
-        <tr>
-            <td>{{ loop.index }}</td>
-            <td>{{ resume }}</td>
-            <td>{{ "%.2f"|format(score * 100) }}%</td>
-        </tr>
-        {% endfor %}
-    </table>
-    {% endif %}
-</div>
+<script src="script.js"></script>
 
 </body>
 </html>

@@ -1,91 +1,125 @@
-import os
-import re
-import nltk
 from flask import Flask, render_template, request
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-from PyPDF2 import PdfReader
-from docx import Document
-from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize
+import os
+import PyPDF2
+import docx
+import nltk
+import re
 
-# Download NLTK resources (only runs first time)
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.decomposition import TruncatedSVD
+from sklearn.metrics.pairwise import cosine_similarity
+
 nltk.download('punkt')
-nltk.download('stopwords')
 
 app = Flask(__name__)
 
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 
-# -------- Extract Text --------
+# ---------------------------
+# TEXT EXTRACTION
+# ---------------------------
+
 def extract_text(file_path):
-    text = ""
-    try:
-        if file_path.endswith(".pdf"):
-            reader = PdfReader(file_path)
+
+    if file_path.endswith(".pdf"):
+        text = ""
+        with open(file_path, "rb") as file:
+            reader = PyPDF2.PdfReader(file)
             for page in reader.pages:
-                text += page.extract_text() or ""
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text
+        return text
 
-        elif file_path.endswith(".docx"):
-            doc = Document(file_path)
-            for para in doc.paragraphs:
-                text += para.text
-    except Exception as e:
-        print("Error reading file:", e)
+    elif file_path.endswith(".docx"):
+        doc = docx.Document(file_path)
+        return "\n".join([para.text for para in doc.paragraphs])
 
-    return text
+    elif file_path.endswith(".txt"):
+        with open(file_path, "r", encoding="utf8") as f:
+            return f.read()
+
+    return ""
 
 
-# -------- Preprocess Text --------
+# ---------------------------
+# PREPROCESSING
+# ---------------------------
+
 def preprocess(text):
+
     text = text.lower()
     text = re.sub(r'[^a-zA-Z ]', '', text)
-    tokens = word_tokenize(text)
-    filtered = [w for w in tokens if w not in stopwords.words('english')]
-    return " ".join(filtered)
+
+    tokens = nltk.word_tokenize(text)
+
+    return " ".join(tokens)
 
 
-# -------- Main Route --------
+# ---------------------------
+# RANKING FUNCTION
+# ---------------------------
+
+def rank_resumes(job_desc, resumes):
+
+    documents = [job_desc] + resumes
+
+    tfidf = TfidfVectorizer(stop_words="english")
+
+    tfidf_matrix = tfidf.fit_transform(documents)
+
+    # Safe SVD size
+    n_components = min(50, tfidf_matrix.shape[1] - 1)
+
+    if n_components > 1:
+        svd = TruncatedSVD(n_components=n_components)
+        reduced_matrix = svd.fit_transform(tfidf_matrix)
+    else:
+        reduced_matrix = tfidf_matrix.toarray()
+
+    job_vector = reduced_matrix[0].reshape(1, -1)
+    resume_vectors = reduced_matrix[1:]
+
+    similarity = cosine_similarity(job_vector, resume_vectors)[0]
+
+    return similarity
+
+
+# ---------------------------
+# MAIN ROUTE
+# ---------------------------
+
 @app.route("/", methods=["GET", "POST"])
 def index():
+
     results = []
 
     if request.method == "POST":
-        job_desc = request.form.get("job_description")
+
+        job_desc = request.form["job_desc"]
+        job_desc = preprocess(job_desc)
+
         files = request.files.getlist("resumes")
 
-        if job_desc and files:
+        resumes = []
+        names = []
 
-            job_desc = preprocess(job_desc)
-            resume_texts = []
-            file_names = []
+        for file in files:
 
-            for file in files:
-                if file.filename.endswith((".pdf", ".docx")):
-                    file_path = os.path.join(app.config["UPLOAD_FOLDER"], file.filename)
-                    file.save(file_path)
+            path = os.path.join(UPLOAD_FOLDER, file.filename)
+            file.save(path)
 
-                    text = extract_text(file_path)
-                    processed = preprocess(text)
+            text = extract_text(path)
+            text = preprocess(text)
 
-                    resume_texts.append(processed)
-                    file_names.append(file.filename)
+            resumes.append(text)
+            names.append(file.filename)
 
-            if resume_texts:
-                documents = [job_desc] + resume_texts
+        scores = rank_resumes(job_desc, resumes)
 
-                vectorizer = TfidfVectorizer()
-                vectors = vectorizer.fit_transform(documents)
-
-                similarity_scores = cosine_similarity(
-                    vectors[0:1], vectors[1:]
-                ).flatten()
-
-                scored = list(zip(file_names, similarity_scores))
-                results = sorted(scored, key=lambda x: x[1], reverse=True)
+        results = sorted(zip(names, scores), key=lambda x: x[1], reverse=True)
 
     return render_template("index.html", results=results)
 
