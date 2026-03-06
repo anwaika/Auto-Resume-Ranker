@@ -16,6 +16,26 @@ app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+# ---------------------------
+# SKILL DATABASE (Weighted)
+# ---------------------------
+
+SKILLS = {
+    "python":5,
+    "sql":5,
+    "statistics":4,
+    "machine learning":5,
+    "data analysis":4,
+    "tableau":3,
+    "power bi":3,
+    "excel":3,
+    "pandas":4,
+    "numpy":4,
+    "deep learning":5,
+    "tensorflow":4,
+    "pytorch":4
+}
+
 
 # ---------------------------
 # TEXT EXTRACTION
@@ -28,9 +48,8 @@ def extract_text(file_path):
         with open(file_path, "rb") as file:
             reader = PyPDF2.PdfReader(file)
             for page in reader.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text
+                if page.extract_text():
+                    text += page.extract_text()
         return text
 
     elif file_path.endswith(".docx"):
@@ -51,11 +70,25 @@ def extract_text(file_path):
 def preprocess(text):
 
     text = text.lower()
-    text = re.sub(r'[^a-zA-Z ]', '', text)
-
+    text = re.sub(r'[^a-zA-Z ]', ' ', text)
     tokens = nltk.word_tokenize(text)
 
     return " ".join(tokens)
+
+
+# ---------------------------
+# SKILL SCORING
+# ---------------------------
+
+def skill_score(resume_text):
+
+    score = 0
+
+    for skill, weight in SKILLS.items():
+        if skill in resume_text:
+            score += weight
+
+    return score
 
 
 # ---------------------------
@@ -70,21 +103,17 @@ def rank_resumes(job_desc, resumes):
 
     tfidf_matrix = tfidf.fit_transform(documents)
 
-    # Safe SVD size
-    n_components = min(50, tfidf_matrix.shape[1] - 1)
+    # ---- SVD (Math syllabus) ----
+    svd = TruncatedSVD(n_components=100)
 
-    if n_components > 1:
-        svd = TruncatedSVD(n_components=n_components)
-        reduced_matrix = svd.fit_transform(tfidf_matrix)
-    else:
-        reduced_matrix = tfidf_matrix.toarray()
+    reduced_matrix = svd.fit_transform(tfidf_matrix)
 
     job_vector = reduced_matrix[0].reshape(1, -1)
     resume_vectors = reduced_matrix[1:]
 
-    similarity = cosine_similarity(job_vector, resume_vectors)[0]
+    similarity_scores = cosine_similarity(job_vector, resume_vectors)[0]
 
-    return similarity
+    return similarity_scores
 
 
 # ---------------------------
@@ -92,19 +121,21 @@ def rank_resumes(job_desc, resumes):
 # ---------------------------
 
 @app.route("/", methods=["GET", "POST"])
+
 def index():
 
     results = []
 
     if request.method == "POST":
 
-        job_desc = request.form["job_desc"]
+        job_desc = request.form.get("job_description","")
         job_desc = preprocess(job_desc)
 
         files = request.files.getlist("resumes")
 
         resumes = []
         names = []
+        skill_scores = []
 
         for file in files:
 
@@ -117,9 +148,24 @@ def index():
             resumes.append(text)
             names.append(file.filename)
 
-        scores = rank_resumes(job_desc, resumes)
+            skill_scores.append(skill_score(text))
 
-        results = sorted(zip(names, scores), key=lambda x: x[1], reverse=True)
+        similarity_scores = rank_resumes(job_desc, resumes)
+
+        # ----- FINAL SCORE -----
+
+        final_scores = []
+
+        for i in range(len(names)):
+
+            skill_component = skill_scores[i] / 50   # normalize
+            similarity_component = similarity_scores[i]
+
+            final_score = (0.7 * similarity_component) + (0.3 * skill_component)
+
+            final_scores.append(final_score)
+
+        results = sorted(zip(names, final_scores), key=lambda x: x[1], reverse=True)
 
     return render_template("index.html", results=results)
 
