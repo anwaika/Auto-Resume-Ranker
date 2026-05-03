@@ -50,7 +50,7 @@
             <button type="submit" id="submitBtn">
                 <span class="btn-text">Rank Resumes</span>
                 <span class="btn-icon">→</span>
-                <div class="btn-loader" id="btnLoader"></div>
+                <div class="btn-loader"></div>
             </button>
 
         </form>
@@ -67,12 +67,34 @@
 
         <div class="method-tags">
             <span class="tag">TF-IDF / VSM</span>
-            <span class="tag">SVD</span>
+            <span class="tag">SVD + Pseudoinverse</span>
             <span class="tag">Cosine Similarity</span>
-            <span class="tag">Ridge Regression</span>
+            <span class="tag">Multivariate Regression</span>
             <span class="tag">Sentence Transformers</span>
         </div>
 
+        <!-- Feature correlation panel -->
+        {% if corr_pairs %}
+        <div class="corr-panel">
+            <div class="corr-title">Feature correlation matrix (live data)</div>
+            <div class="corr-grid">
+                {% for p in corr_pairs %}
+                <div class="corr-item">
+                    <span class="corr-pair">{{ p.a }} ↔ {{ p.b }}</span>
+                    <span class="corr-val {{ p.r_class }}">r = {{ p.r }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- CSV export -->
+        <form method="POST" action="/export-csv" style="margin-bottom:16px;">
+            <input type="hidden" name="results_json" value="{{ results | tojson | e }}">
+            <button type="submit" class="btn-export">↓ Download CSV</button>
+        </form>
+
+        <!-- Ranking list -->
         <div class="ranking-list">
         {% for r in results %}
         <div class="rank-card {% if r.rank == 1 %}rank-first{% elif r.rank == 2 %}rank-second{% elif r.rank == 3 %}rank-third{% endif %}">
@@ -90,10 +112,26 @@
                 </div>
             </div>
 
+            <!-- AI summary (only shown when ANTHROPIC_API_KEY is set) -->
+            {% if r.ai_summary %}
+            <div class="ai-summary">{{ r.ai_summary }}</div>
+            {% endif %}
+
+            <!-- Overall score bar -->
             <div class="score-bar-wrap">
-                <div class="score-bar" style="width: {{ r.final_score if r.final_score > 0 else 0 }}%"></div>
+                <div class="score-bar" style="width:{{ [r.final_score, 0]|max }}%"></div>
             </div>
 
+            <!-- Detected section chips -->
+            {% if r.sections_found %}
+            <div class="section-chips">
+                {% for sec in r.sections_found %}
+                <span class="section-chip">{{ sec }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <!-- Score breakdown -->
             <div class="breakdown">
                 <div class="breakdown-item">
                     <span class="bd-label">TF-IDF / SVD</span>
@@ -112,6 +150,38 @@
                 </div>
             </div>
 
+            <!-- Gradient: score driver breakdown -->
+            {% if r.gradient %}
+            <div class="gradient-section">
+                <div class="gradient-title">Score driven by</div>
+                <div class="breakdown">
+                    {% for feat, pct in r.gradient.items() %}
+                    <div class="breakdown-item">
+                        <span class="bd-label">{{ feat }}</span>
+                        <div class="bd-bar-track"><div class="bd-bar grad-bar" style="width:{{ pct }}%"></div></div>
+                        <span class="bd-val">{{ pct }}%</span>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Skill gap -->
+            {% if r.skill_gap %}
+            <div class="skill-gap">
+                <span class="gap-label">Missing skills</span>
+                <div class="gap-chips">
+                    {% for skill in r.skill_gap %}
+                    <span class="gap-chip">{{ skill }}</span>
+                    {% endfor %}
+                </div>
+            </div>
+            {% else %}
+            <div class="skill-gap skill-gap--none">
+                <span class="gap-label">✓ All required skills matched</span>
+            </div>
+            {% endif %}
+
         </div>
         {% endfor %}
         </div>
@@ -127,19 +197,19 @@
 
 <script>
     const fileInput = document.getElementById("fileInput");
-    const fileList = document.getElementById("fileList");
+    const fileList  = document.getElementById("fileList");
 
     if (fileInput) {
         fileInput.addEventListener("change", function () {
             const files = Array.from(fileInput.files);
-            if (files.length === 0) { fileList.innerHTML = ""; return; }
-            fileList.innerHTML = files.map(file => `
+            if (!files.length) { fileList.innerHTML = ""; return; }
+            fileList.innerHTML = files.map(f => `
                 <div class="file-chip">
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
                         <polyline points="14 2 14 8 20 8"/>
                     </svg>
-                    ${file.name}
+                    ${f.name}
                 </div>`).join("");
         });
     }
