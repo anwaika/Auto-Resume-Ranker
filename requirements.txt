@@ -5,3 +5,5 @@ PyPDF2
 python-docx
 numpy
 sentence-transformers
+spacy
+gunicorn
